@@ -1,6 +1,42 @@
 import { RealtimeAgent, tool } from '@openai/agents/realtime';
 
 /** ---------- THEORY AGENT ---------- **/
+// Shared tool: read reference documents from public/atchalta/refs
+const referenceReadTool = tool({
+  name: 'reference_read',
+  description:
+    'Reads a reference document from /atchalta/refs in this app (Markdown or text). Returns the full text content.',
+  parameters: {
+    type: 'object',
+    properties: {
+      filename: {
+        type: 'string',
+        description:
+          "File name within /atchalta/refs (e.g., 'Atchalta_FieldGuide.md'). Allowed chars: letters, numbers, dot, dash, underscore.",
+      },
+    },
+    required: ['filename'],
+    additionalProperties: false,
+  },
+  execute: async (input: any) => {
+    const { filename } = input as { filename: string };
+    // Basic sanitization to avoid path traversal
+    const isSafe = /^[A-Za-z0-9._-]+$/.test(filename);
+    if (!isSafe) {
+      return { error: 'invalid_filename' } as any;
+    }
+    const url = `/atchalta/refs/${encodeURIComponent(filename)}`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return { error: 'not_found', status: res.status } as any;
+      const content = await res.text();
+      return { url, content } as any;
+    } catch (e: any) {
+      return { error: 'fetch_failed' } as any;
+    }
+  },
+});
+
 export const atchaltaTheoryMentor = new RealtimeAgent({
   name: 'AtchaltaTheoryMentor',
   voice: 'sage',
@@ -14,11 +50,16 @@ You are Atchalta’s Theory Mentor. Your job is to ensure analysts apply correct
 
 Tone: concise, probing, vivid examples, no long lists. Ask 1–2 sharp questions, then deliver the minimal theory needed.
 
+Doc-first policy:
+- Before answering on your first turn each session, call reference_read(filename="Atchalta_FieldGuide.md"). Cache a brief outline mentally and reuse it; re-read targeted sections if needed.
+- Base all answers on the Field Guide; when you draw from a section, cite it inline as: [Field Guide: <Section Heading>].
+- If you have not loaded or cannot cite, do not answer. Prompt: “I’ll load the Field Guide first,” then call reference_read.
+
 Handoff rules:
 - If analyst asks about steps, tools, Sensemaker, prompts, or wants to turn text into concepts → transfer to AtchaltaMethodologyMentor.
 - If analyst asks to validate stage outputs vs. theory → you answer, then (optionally) transfer back for next steps.
 `,
-  tools: [],
+  tools: [referenceReadTool],
   handoffs: [], // wired below
 });
 
@@ -40,6 +81,11 @@ Rules:
 - When ambiguity is high, keep them in abductive mode; ban “final answers”.
 - If the analyst asks for theory rationales, transfer to AtchaltaTheoryMentor.
 
+Doc-first policy:
+- Before answering on your first turn each session, call reference_read(filename="Atchalta_FieldGuide.md"). Cache a brief outline and reuse it; re-read targeted sections when moving stages.
+- Base guidance on the Field Guide; when you use it, cite as [Field Guide: <Section Heading>].
+- If not yet loaded or cannot cite, do not answer; load via reference_read first.
+
 Stage playbooks (ultra-brief):
 FRAMING → Have them free-write raw text with no editing. Prompt: "What does it remind you of? Associations? Emotional hook?"
 DISCOVERY → Emotional thinking + distant associations. Prompt 3–5 out-of-domain explorations.
@@ -51,6 +97,7 @@ CALIBRATION → Yalla/Walla/Sababa triage; pick 2–3 sharp insights; derive str
 Finish each turn with a single concrete next action and a short success criterion.
 `,
   tools: [
+    referenceReadTool,
     tool({
       name: 'sensemaker_note',
       description:
