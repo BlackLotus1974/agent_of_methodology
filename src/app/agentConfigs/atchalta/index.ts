@@ -31,7 +31,7 @@ const referenceReadTool = tool({
       if (!res.ok) return { error: 'not_found', status: res.status } as any;
       const content = await res.text();
       return { url, content } as any;
-    } catch (e: any) {
+    } catch (err: any) {
       return { error: 'fetch_failed' } as any;
     }
   },
@@ -72,7 +72,7 @@ export const atchaltaMethodologyMentor = new RealtimeAgent({
   instructions: `
 You are Atchalta’s Methodology Mentor. Drive the process one step at a time.
 
-Open with: "Hi, you're working with Atchalta’s Methodology Mentor. What stage are you at? (Framing, Discovery, Abstraction, Mapping, Enrichment, Calibration)."
+Open with: "Hi, you're working with Atchalta’s Methodology Mentor. What stage are you at? (Framing, Discovery, Abstraction, Mapping, Enrichment, Calibration). Or do you want to raise a different issue?"
 
 Rules:
 - Never skip stages. If unclear, diagnose stage from the analyst’s last output.
@@ -98,6 +98,95 @@ Finish each turn with a single concrete next action and a short success criterio
 `,
   tools: [
     referenceReadTool,
+    tool({
+      name: 'sensemaker_vision_read',
+      description:
+        'Parse a Sensemaker mind map screenshot and return structured data (nodes, clusters, connections, insights). Accepts a filename from /atchalta/uploads or a full URL.',
+      parameters: {
+        type: 'object',
+        properties: {
+          filename: {
+            type: 'string',
+            description:
+              "Optional. Image filename in /atchalta/uploads (e.g., 'map1.png'). Allowed chars: letters, numbers, dot, dash, underscore.",
+          },
+          image_url: {
+            type: 'string',
+            description:
+              'Optional. Full URL to the image. If provided, takes precedence over filename.',
+          },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+      execute: async (input: any) => {
+        const { filename, image_url } = input as {
+          filename?: string;
+          image_url?: string;
+        };
+
+        let url = image_url?.trim();
+        if (!url && filename) {
+          const isSafe = /^[A-Za-z0-9._-]+$/.test(filename);
+          if (!isSafe) return { error: 'invalid_filename' } as any;
+          url = `/atchalta/uploads/${encodeURIComponent(filename)}`;
+        }
+        if (!url) return { error: 'missing_image' } as any;
+
+        const system = `You are an expert at reading screenshots of Sensemaker-style mind maps.
+Return a compact JSON object with:
+- nodes: [{ id, title }]
+- clusters: [{ name, nodeIds: [ids] }]
+- connections: [{ fromId, toId, type }] // type can be 'link' | 'friction' | 'group'
+- insights: [{ title, rationale }]
+If text is ambiguous or unreadable, include a best-effort guess and add rationale.`;
+
+        const body = {
+          model: 'gpt-4o-mini',
+          input: [
+            {
+              role: 'system',
+              content: [
+                { type: 'input_text', text: system },
+              ],
+            },
+            {
+              role: 'user',
+              content: [
+                { type: 'input_text', text: 'Extract structured content from this map screenshot. Respond with a single JSON object only.' },
+                { type: 'input_image', image_url: url },
+              ],
+            },
+          ],
+        } as any;
+
+        try {
+          const res = await fetch('/api/responses', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          if (!res.ok) return { error: 'vision_failed', status: res.status } as any;
+          const completion = await res.json();
+          const outputItems: any[] = completion.output ?? [];
+          const text = outputItems
+            .filter((it: any) => it.type === 'message')
+            .flatMap((m: any) => (m.content || []))
+            .filter((c: any) => c.type === 'output_text')
+            .map((c: any) => c.text)
+            .join('');
+          // Try to parse JSON; fall back to raw text
+          try {
+            const parsed = JSON.parse(text);
+            return { image_url: url, parsed } as any;
+          } catch {
+            return { image_url: url, raw: text } as any;
+          }
+        } catch {
+          return { error: 'fetch_failed' } as any;
+        }
+      },
+    }),
     tool({
       name: 'sensemaker_note',
       description:
@@ -154,6 +243,7 @@ Finish each turn with a single concrete next action and a short success criterio
 atchaltaTheoryMentor.handoffs = [atchaltaMethodologyMentor];
 atchaltaMethodologyMentor.handoffs = [atchaltaTheoryMentor];
 
-export default [atchaltaMethodologyMentor, atchaltaTheoryMentor];
+const atchaltaAgents = [atchaltaMethodologyMentor, atchaltaTheoryMentor];
+export default atchaltaAgents;
 
 

@@ -1,4 +1,7 @@
 "use client";
+// Import browser shims first to fix OpenAI agents compatibility
+import "@/app/lib/browserShims";
+
 import React, { Suspense } from "react";
 import dynamic from "next/dynamic";
 import { TranscriptProvider } from "@/app/contexts/TranscriptContext";
