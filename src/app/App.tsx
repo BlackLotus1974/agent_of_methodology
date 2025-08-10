@@ -15,7 +15,7 @@ import BottomToolbar from "./components/BottomToolbar";
 
 // Types
 import { SessionStatus } from "@/app/types";
-import type { RealtimeAgent } from '@openai/agents/realtime';
+import type { RealtimeAgent } from "@openai/agents/realtime";
 
 // Context providers & hooks
 import { useTranscript } from "@/app/contexts/TranscriptContext";
@@ -58,13 +58,10 @@ function App() {
   // ---------------------------------------------------------------------
   const urlCodec = searchParams.get("codec") || "opus";
 
-  // Agents SDK doesn't currently support codec selection so it is now forced 
-  // via global codecPatch at module load 
+  // Agents SDK doesn't currently support codec selection so it is now forced
+  // via global codecPatch at module load
 
-  const {
-    addTranscriptMessage,
-    addTranscriptBreadcrumb,
-  } = useTranscript();
+  const { addTranscriptMessage, addTranscriptBreadcrumb } = useTranscript();
   const { logClientEvent, logServerEvent } = useEvent();
 
   const [selectedAgentName, setSelectedAgentName] = useState<string>("");
@@ -77,10 +74,10 @@ function App() {
   const handoffTriggeredRef = useRef(false);
 
   const sdkAudioElement = React.useMemo(() => {
-    if (typeof window === 'undefined') return undefined;
-    const el = document.createElement('audio');
+    if (typeof window === "undefined") return undefined;
+    const el = document.createElement("audio");
     el.autoplay = true;
-    el.style.display = 'none';
+    el.style.display = "none";
     document.body.appendChild(el);
     return el;
   }, []);
@@ -88,70 +85,80 @@ function App() {
   // File upload (Sensemaker map screenshot)
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const handleUploadButtonClick = () => {
-    console.log('Upload button clicked, sessionStatus:', sessionStatus);
-    // Gate upload on connection status
-    if (sessionStatus !== 'CONNECTED') {
-      console.warn('Cannot upload map: session not connected');
-      addTranscriptBreadcrumb('Upload blocked: Not connected');
+    console.log(
+      "Upload button clicked, sessionStatus:",
+      sessionStatus,
+      "WebRTC ready:",
+      isWebRTCReady()
+    );
+    // Gate upload on connection status AND WebRTC readiness
+    if (sessionStatus !== "CONNECTED" || !isWebRTCReady()) {
+      console.warn("Cannot upload map: session not ready");
+      addTranscriptBreadcrumb("Upload blocked: Connection not ready");
       return;
     }
-    console.log('Triggering file input click');
+    console.log("Triggering file input click");
     fileInputRef.current?.click();
   };
   const handleMapFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-    console.log('File selected event triggered');
+    console.log("File selected event triggered");
     const file = e.target.files?.[0];
     if (!file) {
-      console.log('No file selected');
+      console.log("No file selected");
       return;
     }
-    console.log('File selected:', file.name, file.type, file.size);
-    
-    // Double-check connection status when file is selected
-    if (sessionStatus !== 'CONNECTED') {
-      console.warn('Cannot process map upload: session not connected');
-      addTranscriptBreadcrumb('Upload failed: Not connected');
+    console.log("File selected:", file.name, file.type, file.size);
+
+    // Double-check connection status AND WebRTC readiness when file is selected
+    if (sessionStatus !== "CONNECTED" || !isWebRTCReady()) {
+      console.warn("Cannot process map upload: session not ready");
+      addTranscriptBreadcrumb("Upload failed: Connection not ready");
       return;
     }
-    
+
     // Validate file type
-    if (!file.type.startsWith('image/')) {
-      console.warn('Invalid file type:', file.type);
-      addTranscriptBreadcrumb('Upload failed: Invalid file type');
+    if (!file.type.startsWith("image/")) {
+      console.warn("Invalid file type:", file.type);
+      addTranscriptBreadcrumb("Upload failed: Invalid file type");
       return;
     }
-    
+
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
-      addTranscriptBreadcrumb('Map uploaded', { name: file.name, size: file.size });
-      
+      addTranscriptBreadcrumb("Map uploaded", {
+        name: file.name,
+        size: file.size,
+      });
+
       const analysisAsk = `Please analyze this Sensemaker map screenshot using the Atchalta Field Guide. Call sensemaker_vision_read with image_url="${dataUrl}". Then summarize nodes, clusters, connections and 2–3 insights, grounding in [Field Guide] and citing section headings. Finally, propose the next Sensemaker step.`;
-      
+
       // Final connection check before sending
-      if (sessionStatus === 'CONNECTED') {
+      if (sessionStatus === "CONNECTED" && isWebRTCReady()) {
         try {
           sendUserText(analysisAsk);
-          addTranscriptBreadcrumb('Analysis request sent');
+          addTranscriptBreadcrumb("Analysis request sent");
         } catch (err) {
-          console.error('Failed to send analysis request', err);
-          addTranscriptBreadcrumb('Failed to send analysis request', { error: err instanceof Error ? err.message : String(err) });
+          console.error("Failed to send analysis request", err);
+          addTranscriptBreadcrumb("Failed to send analysis request", {
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
       } else {
-        console.warn('Session disconnected during file processing');
-        addTranscriptBreadcrumb('Upload failed: Session disconnected');
+        console.warn("Session not ready during file processing");
+        addTranscriptBreadcrumb("Upload failed: Session not ready");
       }
-      
+
       // reset input value so same file can be re-uploaded
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (fileInputRef.current) fileInputRef.current.value = "";
     };
-    
+
     reader.onerror = () => {
-      console.error('Failed to read file');
-      addTranscriptBreadcrumb('Upload failed: Could not read file');
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      console.error("Failed to read file");
+      addTranscriptBreadcrumb("Upload failed: Could not read file");
+      if (fileInputRef.current) fileInputRef.current.value = "";
     };
-    
+
     reader.readAsDataURL(file);
   };
 
@@ -169,10 +176,12 @@ function App() {
     sendEvent,
     interrupt,
     mute,
+    isWebRTCReady,
   } = useRealtimeSession({
     onConnectionChange: (s) => {
+      console.log("[App] onConnectionChange called with status:", s);
       setSessionStatus(s as SessionStatus);
-      if (s === 'DISCONNECTED') {
+      if (s === "DISCONNECTED") {
         connectionAttemptRef.current = false;
         // Clear queues when connection drops
         setPendingText(null);
@@ -195,10 +204,10 @@ function App() {
   const [isPTTUserSpeaking, setIsPTTUserSpeaking] = useState<boolean>(false);
   const [isAudioPlaybackEnabled, setIsAudioPlaybackEnabled] = useState<boolean>(
     () => {
-      if (typeof window === 'undefined') return true;
-      const stored = localStorage.getItem('audioPlaybackEnabled');
-      return stored ? stored === 'true' : true;
-    },
+      if (typeof window === "undefined") return true;
+      const stored = localStorage.getItem("audioPlaybackEnabled");
+      return stored ? stored === "true" : true;
+    }
   );
   const [pendingText, setPendingText] = useState<string | null>(null);
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
@@ -209,16 +218,16 @@ function App() {
     useAudioDownload();
 
   const sendClientEvent = (eventObj: any, eventNameSuffix = "") => {
-    if (sessionStatus !== 'CONNECTED') {
-      console.warn('Cannot send event: session not connected', eventObj);
+    if (sessionStatus !== "CONNECTED" || !isWebRTCReady()) {
+      console.warn("Cannot send event: session not ready", eventObj);
       return;
     }
-    
+
     try {
       sendEvent(eventObj);
       logClientEvent(eventObj, eventNameSuffix);
     } catch (err) {
-      console.error('Failed to send via SDK', err);
+      console.error("Failed to send via SDK", err);
     }
   };
 
@@ -271,38 +280,44 @@ function App() {
 
   // Flush queued messages when connection becomes available
   useEffect(() => {
-    if (sessionStatus === 'CONNECTED') {
+    if (sessionStatus === "CONNECTED" && isWebRTCReady()) {
       // Process pending text first
       if (pendingText) {
         try {
           sendUserText(pendingText);
         } catch (err) {
-          console.error('Failed to flush pending text', err);
+          console.error("Failed to flush pending text", err);
         } finally {
           setPendingText(null);
         }
       }
-      
+
       // Process message queue
       if (messageQueue.length > 0) {
         const messagesToProcess = [...messageQueue];
         setMessageQueue([]);
-        
+
         messagesToProcess.forEach((message, index) => {
           try {
             // Add small delay between messages to avoid overwhelming the connection
             setTimeout(() => {
-              if (sessionStatus === 'CONNECTED') {
+              if (sessionStatus === "CONNECTED" && isWebRTCReady()) {
                 sendUserText(message);
               }
             }, index * 100);
           } catch (err) {
-            console.error('Failed to flush queued message', err);
+            console.error("Failed to flush queued message", err);
           }
         });
       }
     }
-  }, [sessionStatus, pendingText, messageQueue.length, sendUserText]);
+  }, [
+    sessionStatus,
+    pendingText,
+    messageQueue.length,
+    sendUserText,
+    isWebRTCReady,
+  ]);
 
   const fetchEphemeralKey = async (): Promise<string | null> => {
     logClientEvent({ url: "/session" }, "fetch_session_token_request");
@@ -324,35 +339,39 @@ function App() {
     const agentSetKey = searchParams.get("agentConfig") || "default";
     if (sdkScenarioMap[agentSetKey]) {
       if (sessionStatus !== "DISCONNECTED" || connectionAttemptRef.current) {
-        console.warn('Connection attempt blocked: already connecting or connected');
+        console.warn(
+          "Connection attempt blocked: already connecting or connected"
+        );
         return;
       }
-      
+
       connectionAttemptRef.current = true;
       setSessionStatus("CONNECTING");
-      addTranscriptBreadcrumb('Connecting to realtime session...');
+      addTranscriptBreadcrumb("Connecting to realtime session...");
 
       try {
         const EPHEMERAL_KEY = await fetchEphemeralKey();
         if (!EPHEMERAL_KEY) {
           setSessionStatus("DISCONNECTED");
-          addTranscriptBreadcrumb('Connection failed: No ephemeral key');
+          addTranscriptBreadcrumb("Connection failed: No ephemeral key");
           return;
         }
 
         // Ensure the selectedAgentName is first so that it becomes the root
         const reorderedAgents = [...sdkScenarioMap[agentSetKey]];
-        const idx = reorderedAgents.findIndex((a) => a.name === selectedAgentName);
+        const idx = reorderedAgents.findIndex(
+          (a) => a.name === selectedAgentName
+        );
         if (idx > 0) {
           const [agent] = reorderedAgents.splice(idx, 1);
           reorderedAgents.unshift(agent);
         }
 
         let companyName = chatSupervisorCompanyName;
-        if (agentSetKey === 'customerServiceRetail') {
+        if (agentSetKey === "customerServiceRetail") {
           companyName = customerServiceRetailCompanyName;
-        } else if (agentSetKey === 'atchalta') {
-          companyName = 'Atchalta';
+        } else if (agentSetKey === "atchalta") {
+          companyName = "Atchalta";
         }
         const guardrail = createModerationGuardrail(companyName);
 
@@ -365,12 +384,14 @@ function App() {
             addTranscriptBreadcrumb,
           },
         });
-        
-        addTranscriptBreadcrumb('Connected successfully');
+
+        addTranscriptBreadcrumb("Connected successfully");
       } catch (err) {
         console.error("Error connecting via SDK:", err);
         setSessionStatus("DISCONNECTED");
-        addTranscriptBreadcrumb('Connection failed', { error: err instanceof Error ? err.message : String(err) });
+        addTranscriptBreadcrumb("Connection failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
       } finally {
         connectionAttemptRef.current = false;
       }
@@ -381,9 +402,9 @@ function App() {
   const disconnectFromRealtime = () => {
     try {
       disconnect();
-      addTranscriptBreadcrumb('Disconnected from realtime session');
+      addTranscriptBreadcrumb("Disconnected from realtime session");
     } catch (err) {
-      console.error('Error during disconnect:', err);
+      console.error("Error during disconnect:", err);
     } finally {
       setSessionStatus("DISCONNECTED");
       setIsPTTUserSpeaking(false);
@@ -395,39 +416,42 @@ function App() {
   };
 
   const sendSimulatedUserMessage = (text: string) => {
-    if (sessionStatus !== 'CONNECTED') {
-      console.warn('Cannot send simulated message: session not connected');
+    if (sessionStatus !== "CONNECTED" || !isWebRTCReady()) {
+      console.warn("Cannot send simulated message: session not ready");
       return;
     }
-    
+
     const id = uuidv4().slice(0, 32);
     addTranscriptMessage(id, "user", text, true);
 
     sendClientEvent({
-      type: 'conversation.item.create',
+      type: "conversation.item.create",
       item: {
         id,
-        type: 'message',
-        role: 'user',
-        content: [{ type: 'input_text', text }],
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text }],
       },
     });
-    sendClientEvent({ type: 'response.create' }, '(simulated user text message)');
+    sendClientEvent(
+      { type: "response.create" },
+      "(simulated user text message)"
+    );
   };
 
   const updateSession = (shouldTriggerResponse: boolean = false) => {
-    if (sessionStatus !== 'CONNECTED') {
-      console.warn('Cannot update session: not connected');
+    if (sessionStatus !== "CONNECTED" || !isWebRTCReady()) {
+      console.warn("Cannot update session: not ready");
       return;
     }
-    
+
     // Reflect Push-to-Talk UI state by (de)activating server VAD on the
     // backend. The Realtime SDK supports live session updates via the
     // `session.update` event.
     const turnDetection = isPTTActive
       ? null
       : {
-          type: 'server_vad',
+          type: "server_vad",
           threshold: 0.9,
           prefix_padding_ms: 300,
           silence_duration_ms: 500,
@@ -436,7 +460,7 @@ function App() {
 
     try {
       sendEvent({
-        type: 'session.update',
+        type: "session.update",
         session: {
           turn_detection: turnDetection,
         },
@@ -444,77 +468,77 @@ function App() {
 
       // Send an initial 'hi' message to trigger the agent to greet the user
       if (shouldTriggerResponse) {
-        sendSimulatedUserMessage('hi');
+        sendSimulatedUserMessage("hi");
       }
     } catch (err) {
-      console.error('Failed to update session', err);
+      console.error("Failed to update session", err);
     }
   };
 
   const handleSendTextMessage = () => {
     const text = userText.trim();
     if (!text) return;
-    
-    if (sessionStatus !== 'CONNECTED') {
+
+    if (sessionStatus !== "CONNECTED" || !isWebRTCReady()) {
       // Queue the message and attempt to connect
-      setMessageQueue(prev => [...prev, text]);
+      setMessageQueue((prev) => [...prev, text]);
       setUserText("");
-      if (sessionStatus === 'DISCONNECTED') {
+      if (sessionStatus === "DISCONNECTED") {
         connectToRealtime();
       }
       return;
     }
-    
+
     try {
-      // Double-check connection status before sending
-      if (sessionStatus === 'CONNECTED') {
+      // Double-check connection status and WebRTC readiness before sending
+      if (sessionStatus === "CONNECTED" && isWebRTCReady()) {
         interrupt();
         sendUserText(text);
         setUserText("");
       } else {
-        // Connection dropped, queue the message
-        setMessageQueue(prev => [...prev, text]);
+        // Connection not ready, queue the message
+        setMessageQueue((prev) => [...prev, text]);
         setUserText("");
       }
     } catch (err) {
-      console.error('Failed to send via SDK', err);
+      console.error("Failed to send via SDK", err);
       // Re-queue the message if send fails
-      setMessageQueue(prev => [...prev, text]);
+      setMessageQueue((prev) => [...prev, text]);
       setUserText("");
     }
   };
 
   const handleTalkButtonDown = () => {
-    if (sessionStatus !== 'CONNECTED') {
-      console.warn('Cannot start PTT: session not connected');
+    if (sessionStatus !== "CONNECTED" || !isWebRTCReady()) {
+      console.warn("Cannot start PTT: session not ready");
       return;
     }
-    
+
     try {
       interrupt();
       setIsPTTUserSpeaking(true);
-      sendClientEvent({ type: 'input_audio_buffer.clear' }, 'clear PTT buffer');
+      sendClientEvent({ type: "input_audio_buffer.clear" }, "clear PTT buffer");
     } catch (err) {
-      console.error('Failed to start PTT', err);
+      console.error("Failed to start PTT", err);
       setIsPTTUserSpeaking(false);
     }
   };
 
   const handleTalkButtonUp = () => {
-    if (sessionStatus !== 'CONNECTED') {
-      console.warn('Cannot end PTT: session not connected');
+    if (sessionStatus !== "CONNECTED" || !isWebRTCReady()) {
+      console.warn("Cannot end PTT: session not ready");
       setIsPTTUserSpeaking(false);
       return;
     }
-    
+
     if (!isPTTUserSpeaking) return;
 
     try {
       setIsPTTUserSpeaking(false);
-      sendClientEvent({ type: 'input_audio_buffer.commit' }, 'commit PTT');
-      sendClientEvent({ type: 'response.create' }, 'trigger response PTT');
+      sendClientEvent({ type: "input_audio_buffer.commit" }, "commit PTT");
+      sendClientEvent({ type: "response.create" }, "trigger response PTT");
     } catch (err) {
-      console.error('Failed to end PTT', err);
+      console.error("Failed to end PTT", err);
     }
   };
 
@@ -599,22 +623,22 @@ function App() {
     }
 
     // Toggle server-side audio stream mute so bandwidth is saved when the
-    // user disables playback. 
+    // user disables playback.
     try {
       mute(!isAudioPlaybackEnabled);
     } catch (err) {
-      console.warn('Failed to toggle SDK mute', err);
+      console.warn("Failed to toggle SDK mute", err);
     }
   }, [isAudioPlaybackEnabled]);
 
   // Ensure mute state is propagated to transport right after we connect or
   // whenever the SDK client reference becomes available.
   useEffect(() => {
-    if (sessionStatus === 'CONNECTED') {
+    if (sessionStatus === "CONNECTED") {
       try {
         mute(!isAudioPlaybackEnabled);
       } catch (err) {
-        console.warn('mute sync after connect failed', err);
+        console.warn("mute sync after connect failed", err);
       }
     }
   }, [sessionStatus, isAudioPlaybackEnabled]);
@@ -651,21 +675,33 @@ function App() {
             />
           </div>
           <div className="flex items-center gap-3">
-            <span>Realtime API <span className="text-gray-500">Agents</span></span>
+            <span>
+              Realtime API <span className="text-gray-500">Agents</span>
+            </span>
             <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${
-                sessionStatus === 'CONNECTED' ? 'bg-green-500' :
-                sessionStatus === 'CONNECTING' ? 'bg-yellow-500 animate-pulse' :
-                'bg-red-500'
-              }`} />
-              <span className={`text-sm font-normal ${
-                sessionStatus === 'CONNECTED' ? 'text-green-600' :
-                sessionStatus === 'CONNECTING' ? 'text-yellow-600' :
-                'text-red-600'
-              }`}>
-                {sessionStatus === 'CONNECTED' ? 'Connected' :
-                 sessionStatus === 'CONNECTING' ? 'Connecting...' :
-                 'Disconnected'}
+              <div
+                className={`w-2 h-2 rounded-full ${
+                  sessionStatus === "CONNECTED"
+                    ? "bg-green-500"
+                    : sessionStatus === "CONNECTING"
+                    ? "bg-yellow-500 animate-pulse"
+                    : "bg-red-500"
+                }`}
+              />
+              <span
+                className={`text-sm font-normal ${
+                  sessionStatus === "CONNECTED"
+                    ? "text-green-600"
+                    : sessionStatus === "CONNECTING"
+                    ? "text-yellow-600"
+                    : "text-red-600"
+                }`}
+              >
+                {sessionStatus === "CONNECTED"
+                  ? "Connected"
+                  : sessionStatus === "CONNECTING"
+                  ? "Connecting..."
+                  : "Disconnected"}
               </span>
             </div>
           </div>
@@ -741,19 +777,19 @@ function App() {
             />
             <button
               onClick={handleUploadButtonClick}
-              disabled={sessionStatus !== 'CONNECTED'}
+              disabled={sessionStatus !== "CONNECTED" || !isWebRTCReady()}
               className={`border border-gray-300 rounded-lg text-base px-3 py-1 ${
-                sessionStatus === 'CONNECTED'
-                  ? 'cursor-pointer bg-white hover:bg-gray-50'
-                  : 'cursor-not-allowed bg-gray-100 text-gray-400'
+                sessionStatus === "CONNECTED" && isWebRTCReady()
+                  ? "cursor-pointer bg-white hover:bg-gray-50"
+                  : "cursor-not-allowed bg-gray-100 text-gray-400"
               }`}
               title={
-                sessionStatus === 'CONNECTED'
+                sessionStatus === "CONNECTED" && isWebRTCReady()
                   ? "Upload Sensemaker map screenshot"
-                  : "Connect to upload map"
+                  : "Connect and wait for WebRTC ready"
               }
             >
-              Upload Map ({sessionStatus})
+              Upload Map
             </button>
           </div>
         </div>
@@ -765,9 +801,7 @@ function App() {
           setUserText={setUserText}
           onSendMessage={handleSendTextMessage}
           downloadRecording={downloadRecording}
-          canSend={
-            sessionStatus === "CONNECTED"
-          }
+          canSend={sessionStatus === "CONNECTED" && isWebRTCReady()}
         />
 
         <Events isExpanded={isEventsPaneExpanded} />

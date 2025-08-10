@@ -161,8 +161,64 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
     updateStatus('DISCONNECTED');
   }, [updateStatus]);
 
+  const isWebRTCReady = useCallback(() => {
+    console.log('[isWebRTCReady] Session status:', status);
+    
+    if (status !== 'CONNECTED' || !sessionRef.current) {
+      console.log('[isWebRTCReady] Session not connected');
+      return false;
+    }
+    
+    // Test if we can actually send events without throwing
+    try {
+      const transport = sessionRef.current.transport as any;
+      
+      // Try to access the WebRTC connection state
+      if (transport && transport.pc) {
+        const connectionState = transport.pc.connectionState;
+        const iceState = transport.pc.iceConnectionState;
+        const signalingState = transport.pc.signalingState;
+        console.log('[isWebRTCReady] PC states - connection:', connectionState, 'ICE:', iceState, 'signaling:', signalingState);
+        
+        // Check if peer connection is properly connected
+        if (connectionState === 'connected' && (iceState === 'connected' || iceState === 'completed')) {
+          console.log('[isWebRTCReady] WebRTC ready');
+          return true;
+        }
+        
+        // Also log what we're waiting for
+        console.log('[isWebRTCReady] Waiting for connection:connected and ICE:connected/completed');
+        
+        // Temporary fallback: if we've been connected for a while and have a peer connection,
+        // assume it's working even if states aren't perfect
+        if (connectionState !== 'failed' && connectionState !== 'disconnected' && iceState !== 'failed') {
+          console.log('[isWebRTCReady] Using fallback - connection seems stable');
+          return true;
+        }
+      } else {
+        console.log('[isWebRTCReady] No transport.pc found');
+      }
+      
+      console.log('[isWebRTCReady] WebRTC not ready - connection states not ready');
+      return false;
+    } catch (error) {
+      console.log('[isWebRTCReady] Error checking WebRTC state:', error);
+      return false;
+    }
+  }, [status]);
+
   const assertconnected = () => {
     if (!sessionRef.current) throw new Error('RealtimeSession not connected');
+    
+    console.log('[assertconnected] Current status:', status);
+    if (status !== 'CONNECTED') {
+      throw new Error(`Session not connected. Status: ${status}`);
+    }
+    
+    // Check WebRTC data channel readiness
+    if (!isWebRTCReady()) {
+      throw new Error('WebRTC data channel not ready. Wait for connection to stabilize.');
+    }
   };
 
   /* ----------------------- message helpers ------------------------- */
@@ -172,9 +228,10 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
   }, []);
   
   const sendUserText = useCallback((text: string) => {
+    console.log('[sendUserText] Called with status:', status);
     assertconnected();
     sessionRef.current!.sendMessage(text);
-  }, []);
+  }, [status]);
 
   const sendEvent = useCallback((ev: any) => {
     sessionRef.current?.transport.sendEvent(ev);
@@ -205,5 +262,6 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
     pushToTalkStart,
     pushToTalkStop,
     interrupt,
+    isWebRTCReady,
   } as const;
 }

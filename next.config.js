@@ -33,9 +33,7 @@ const nextConfig = {
 
     return config;
   },
-  experimental: {
-    esmExternals: 'loose',
-  },
+
   transpilePackages: [
     '@openai/agents',
     '@openai/agents-core',

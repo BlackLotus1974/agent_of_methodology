@@ -1,11 +1,21 @@
 // Browser compatibility shims for OpenAI Agents SDK
 // This fixes the "Cannot read properties of undefined (reading 'bind')" error
 
+// Ensure Function.prototype.bind exists FIRST
+if (typeof Function.prototype.bind === 'undefined') {
+  Function.prototype.bind = function(thisArg: any, ...args: any[]) {
+    const fn = this;
+    return function(...innerArgs: any[]) {
+      return fn.apply(thisArg, args.concat(innerArgs));
+    };
+  };
+}
+
 // Polyfill for Node.js process object
 if (typeof window !== 'undefined' && typeof (window as any).process === 'undefined') {
   (window as any).process = {
     env: {},
-    nextTick: (callback: Function) => setTimeout(callback, 0),
+    nextTick: (callback: () => void) => setTimeout(callback, 0),
     version: 'v18.0.0',
     versions: { node: '18.0.0' },
     platform: 'browser',
@@ -27,16 +37,18 @@ if (typeof window !== 'undefined' && typeof (window as any).process === 'undefin
     execPath: '/usr/bin/node',
     execArgv: [],
     stdout: { 
-      write: console.log.bind ? console.log.bind(console) : console.log,
+      write: (...args: any[]) => console.log(...args),
       on: () => {},
       once: () => {},
       emit: () => {},
+      bind: () => {},
     },
     stderr: { 
-      write: console.error.bind ? console.error.bind(console) : console.error,
+      write: (...args: any[]) => console.error(...args),
       on: () => {},
       once: () => {},
       emit: () => {},
+      bind: () => {},
     },
     stdin: { 
       read: () => null,
@@ -67,18 +79,20 @@ if (typeof window !== 'undefined' && typeof (window as any).global === 'undefine
   (window as any).global = window;
 }
 
+
+
 // Polyfill for EventEmitter-like functionality
 if (typeof window !== 'undefined') {
   const EventEmitter = class {
-    private events: { [key: string]: Function[] } = {};
+    private events: { [key: string]: ((...args: any[]) => void)[] } = {};
     
-    on(event: string, listener: Function) {
+    on(event: string, listener: (...args: any[]) => void) {
       if (!this.events[event]) this.events[event] = [];
       this.events[event].push(listener);
       return this;
     }
     
-    once(event: string, listener: Function) {
+    once(event: string, listener: (...args: any[]) => void) {
       const onceWrapper = (...args: any[]) => {
         this.removeListener(event, onceWrapper);
         listener.apply(this, args);
@@ -92,7 +106,7 @@ if (typeof window !== 'undefined') {
       return true;
     }
     
-    removeListener(event: string, listener: Function) {
+    removeListener(event: string, listener: (...args: any[]) => void) {
       if (!this.events[event]) return this;
       this.events[event] = this.events[event].filter(l => l !== listener);
       return this;

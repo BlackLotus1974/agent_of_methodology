@@ -31,7 +31,7 @@ const referenceReadTool = tool({
       if (!res.ok) return { error: "not_found", status: res.status } as any;
       const content = await res.text();
       return { url, content } as any;
-    } catch (err: any) {
+    } catch {
       return { error: "fetch_failed" } as any;
     }
   },
